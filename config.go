@@ -82,6 +82,11 @@ type Config struct {
 	// Adds the must staple TLS extension to the CSR.
 	MustStaple bool
 
+	// Prevents private keys from being loaded from persistent storage
+	// Useful when the storage adapter uploads keys to a CDN and cannot
+	// retrieve them
+	PreventLoadingKeys bool
+
 	// Sources for getting new, managed certificates;
 	// the default Issuer is ACMEIssuer. If multiple
 	// issuers are specified, they will be tried in
@@ -208,6 +213,9 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 	}
 	if !cfg.MustStaple {
 		cfg.MustStaple = Default.MustStaple
+	}
+	if !cfg.PreventLoadingKeys {
+		cfg.PreventLoadingKeys = Default.PreventLoadingKeys
 	}
 	if len(cfg.Issuers) == 0 {
 		cfg.Issuers = Default.Issuers
@@ -620,6 +628,11 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 // is found, that issuer should be tried first, so it is moved to the front in a copy of
 // cfg.Issuers).
 func (cfg *Config) reusePrivateKey(ctx context.Context, domain string) (privKey crypto.PrivateKey, privKeyPEM []byte, issuers []Issuer, err error) {
+	// when not storing keys return the nil object
+	if cfg.PreventLoadingKeys {
+		return nil, nil, nil, nil
+	}
+
 	// make a copy of cfg.Issuers so that if we have to reorder elements, we don't
 	// inadvertently mutate the configured issuers (see append calls below)
 	issuers = make([]Issuer, len(cfg.Issuers))
@@ -752,10 +765,16 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 			return fmt.Errorf("renewing certificate aborted by event handler: %w", err)
 		}
 
-		privateKey, err := PEMDecodePrivateKey(certRes.PrivateKeyPEM)
+		var privateKey crypto.PrivateKey
+		if cfg.PreventLoadingKeys {
+			privateKey, err = cfg.KeySource.GenerateKey()
+		} else {
+			privateKey, err = PEMDecodePrivateKey(certRes.PrivateKeyPEM)
+		}
 		if err != nil {
 			return err
 		}
+
 		csr, err := cfg.generateCSR(privateKey, []string{name})
 		if err != nil {
 			return err
@@ -1042,7 +1061,7 @@ func (cfg *Config) storageHasCertResources(ctx context.Context, issuer Issuer, d
 	keyKey := StorageKeys.SitePrivateKey(issuerKey, domain)
 	metaKey := StorageKeys.SiteMeta(issuerKey, domain)
 	return cfg.Storage.Exists(ctx, certKey) &&
-		cfg.Storage.Exists(ctx, keyKey) &&
+		(cfg.PreventLoadingKeys || cfg.Storage.Exists(ctx, keyKey)) &&
 		cfg.Storage.Exists(ctx, metaKey)
 }
 
@@ -1054,9 +1073,11 @@ func (cfg *Config) deleteSiteAssets(ctx context.Context, issuerKey, domain strin
 	if err != nil {
 		return fmt.Errorf("deleting certificate file: %v", err)
 	}
-	err = cfg.Storage.Delete(ctx, StorageKeys.SitePrivateKey(issuerKey, domain))
-	if err != nil {
-		return fmt.Errorf("deleting private key: %v", err)
+	if !cfg.PreventLoadingKeys {
+		err = cfg.Storage.Delete(ctx, StorageKeys.SitePrivateKey(issuerKey, domain))
+		if err != nil {
+			return fmt.Errorf("deleting private key: %v", err)
+		}
 	}
 	err = cfg.Storage.Delete(ctx, StorageKeys.SiteMeta(issuerKey, domain))
 	if err != nil {
