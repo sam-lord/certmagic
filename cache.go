@@ -92,9 +92,6 @@ type Cache struct {
 // any locks for other processes to unblock!
 func NewCache(opts CacheOptions) *Cache {
 	// assume default options if necessary
-	if opts.OCSPCheckInterval <= 0 {
-		opts.OCSPCheckInterval = DefaultOCSPCheckInterval
-	}
 	if opts.RenewCheckInterval <= 0 {
 		opts.RenewCheckInterval = DefaultRenewCheckInterval
 	}
@@ -143,9 +140,9 @@ func (certCache *Cache) Stop() {
 type CacheOptions struct {
 	// REQUIRED. A function that returns a configuration
 	// used for managing a certificate, or for accessing
-	// that certificate's asset storage (e.g. for
-	// OCSP staples, etc). The returned Config MUST
-	// be associated with the same Cache as the caller.
+	// that certificate's asset storage. The returned
+	// Config MUST be associated with the same Cache as
+	// the caller.
 	//
 	// The reason this is a callback function, dynamically
 	// returning a Config (instead of attaching a static
@@ -158,10 +155,6 @@ type CacheOptions struct {
 	// challenge (if used) would need to be adjusted from
 	// the last time it was run ~8 weeks ago.
 	GetConfigForCert ConfigGetter
-
-	// How often to check certificates for renewal;
-	// if unset, DefaultOCSPCheckInterval will be used.
-	OCSPCheckInterval time.Duration
 
 	// How often to check certificates for renewal;
 	// if unset, DefaultRenewCheckInterval will be used.
@@ -201,7 +194,7 @@ func (certCache *Cache) unsyncedCacheCertificate(cert Certificate) {
 	if _, ok := certCache.cache[cert.hash]; ok {
 		certCache.logger.Debug("certificate already cached",
 			zap.Strings("subjects", cert.Names),
-			zap.Time("expiration", expiresAt(cert.Leaf)),
+			zap.Time("expiration", expiresAt(&cert.Certificate)),
 			zap.Bool("managed", cert.managed),
 			zap.String("issuer_key", cert.issuerKey),
 			zap.String("hash", cert.hash))
@@ -242,7 +235,7 @@ func (certCache *Cache) unsyncedCacheCertificate(cert Certificate) {
 
 	certCache.logger.Debug("added certificate to cache",
 		zap.Strings("subjects", cert.Names),
-		zap.Time("expiration", expiresAt(cert.Leaf)),
+		zap.Time("expiration", expiresAt(&cert.Certificate)),
 		zap.Bool("managed", cert.managed),
 		zap.String("issuer_key", cert.issuerKey),
 		zap.String("hash", cert.hash),
@@ -276,7 +269,7 @@ func (certCache *Cache) removeCertificate(cert Certificate) {
 
 	certCache.logger.Debug("removed certificate from cache",
 		zap.Strings("subjects", cert.Names),
-		zap.Time("expiration", expiresAt(cert.Leaf)),
+		zap.Time("expiration", expiresAt(&cert.Certificate)),
 		zap.Bool("managed", cert.managed),
 		zap.String("issuer_key", cert.issuerKey),
 		zap.String("hash", cert.hash),
@@ -295,7 +288,7 @@ func (certCache *Cache) replaceCertificate(oldCert, newCert Certificate) {
 	certCache.mu.Unlock()
 	certCache.logger.Info("replaced certificate in cache",
 		zap.Strings("subjects", newCert.Names),
-		zap.Time("new_expiration", expiresAt(newCert.Leaf)))
+		zap.Time("new_expiration", expiresAt(&newCert.Certificate)))
 }
 
 func (certCache *Cache) getAllMatchingCerts(name string) []Certificate {

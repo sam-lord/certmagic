@@ -199,25 +199,6 @@ func (iss *ACMEIssuer) newACMEClient(useTestCA bool) (*acmez.Client, error) {
 				},
 			}
 		}
-
-		// enable TLS-ALPN-01 challenge
-		if !iss.DisableTLSALPNChallenge {
-			useTLSALPNPort := TLSALPNChallengePort
-			if HTTPSPort > 0 && HTTPSPort != TLSALPNChallengePort {
-				useTLSALPNPort = HTTPSPort
-			}
-			if iss.AltTLSALPNPort > 0 {
-				useTLSALPNPort = iss.AltTLSALPNPort
-			}
-			client.ChallengeSolvers[acme.ChallengeTypeTLSALPN01] = distributedSolver{
-				storage:                iss.config.Storage,
-				storageKeyIssuerPrefix: iss.storageKeyCAPrefix(client.Directory),
-				solver: &tlsALPNSolver{
-					config:  iss.config,
-					address: net.JoinHostPort(iss.ListenHost, strconv.Itoa(useTLSALPNPort)),
-				},
-			}
-		}
 	} else {
 		// use DNS challenge exclusively
 		client.ChallengeSolvers[acme.ChallengeTypeDNS01] = iss.DNS01Solver

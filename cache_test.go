@@ -24,9 +24,6 @@ func TestNewCache(t *testing.T) {
 	if c.options.RenewCheckInterval != DefaultRenewCheckInterval {
 		t.Errorf("Expected RenewCheckInterval to be set to default value, but it wasn't: %s", c.options.RenewCheckInterval)
 	}
-	if c.options.OCSPCheckInterval != DefaultOCSPCheckInterval {
-		t.Errorf("Expected OCSPCheckInterval to be set to default value, but it wasn't: %s", c.options.OCSPCheckInterval)
-	}
 	if c.options.GetConfigForCert == nil {
 		t.Error("Expected GetConfigForCert to be set, but it was nil")
 	}

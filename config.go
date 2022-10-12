@@ -21,8 +21,6 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/asn1"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,10 +31,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mholt/acmez"
 	"github.com/mholt/acmez/acme"
 	"go.uber.org/zap"
-	"golang.org/x/crypto/ocsp"
 	"golang.org/x/net/idna"
 )
 
@@ -79,14 +75,6 @@ type Config struct {
 	// TODO: Can we call this feature "Reactive/Lazy/Passive TLS" instead?
 	OnDemand *OnDemandConfig
 
-	// Adds the must staple TLS extension to the CSR.
-	MustStaple bool
-
-	// Prevents private keys from being loaded from persistent storage
-	// Useful when the storage adapter uploads keys to a CDN and cannot
-	// retrieve them
-	PreventLoadingKeys bool
-
 	// Sources for getting new, managed certificates;
 	// the default Issuer is ACMEIssuer. If multiple
 	// issuers are specified, they will be tried in
@@ -111,14 +99,6 @@ type Config struct {
 	// if not set, DefaultCertificateSelector will
 	// be used.
 	CertSelection CertificateSelector
-
-	// OCSP configures how OCSP is handled. By default,
-	// OCSP responses are fetched for every certificate
-	// with a responder URL, and cached on disk. Changing
-	// these defaults is STRONGLY discouraged unless you
-	// have a compelling reason to put clients at greater
-	// risk and reduce their privacy.
-	OCSP OCSPConfig
 
 	// The storage to access when storing or loading
 	// TLS assets. Default is the local file system.
@@ -210,12 +190,6 @@ func newWithCache(certCache *Cache, cfg Config) *Config {
 
 	if cfg.OnDemand == nil {
 		cfg.OnDemand = Default.OnDemand
-	}
-	if !cfg.MustStaple {
-		cfg.MustStaple = Default.MustStaple
-	}
-	if !cfg.PreventLoadingKeys {
-		cfg.PreventLoadingKeys = Default.PreventLoadingKeys
 	}
 	if len(cfg.Issuers) == 0 {
 		cfg.Issuers = Default.Issuers
@@ -400,7 +374,7 @@ func (cfg *Config) manageOne(ctx context.Context, domainName string, async bool)
 	// force a renewal even if it's not expiring
 	renew := func() error {
 		// first, ensure status is not revoked (it was just refreshed in CacheManagedCertificate above)
-		if !cert.Expired() && cert.ocsp != nil && cert.ocsp.Status == ocsp.Revoked {
+		if !cert.Expired() {
 			_, err = cfg.forceRenew(ctx, cfg.Logger, cert)
 			return err
 		}
@@ -628,41 +602,7 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 // is found, that issuer should be tried first, so it is moved to the front in a copy of
 // cfg.Issuers).
 func (cfg *Config) reusePrivateKey(ctx context.Context, domain string) (privKey crypto.PrivateKey, privKeyPEM []byte, issuers []Issuer, err error) {
-	// when not storing keys return the nil object
-	if cfg.PreventLoadingKeys {
-		return nil, nil, nil, nil
-	}
-
-	// make a copy of cfg.Issuers so that if we have to reorder elements, we don't
-	// inadvertently mutate the configured issuers (see append calls below)
-	issuers = make([]Issuer, len(cfg.Issuers))
-	copy(issuers, cfg.Issuers)
-
-	for i, issuer := range issuers {
-		// see if this issuer location in storage has a private key for the domain
-		privateKeyStorageKey := StorageKeys.SitePrivateKey(issuer.IssuerKey(), domain)
-		privKeyPEM, err = cfg.Storage.Load(ctx, privateKeyStorageKey)
-		if errors.Is(err, fs.ErrNotExist) {
-			err = nil // obviously, it's OK to not have a private key; so don't prevent obtaining a cert
-			continue
-		}
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("loading existing private key for reuse with issuer %s: %v", issuer.IssuerKey(), err)
-		}
-
-		// we loaded a private key; try decoding it so we can use it
-		privKey, err = PEMDecodePrivateKey(privKeyPEM)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-
-		// since the private key was found in storage for this issuer, move it
-		// to the front of the list so we prefer this issuer first
-		issuers = append([]Issuer{issuer}, append(issuers[:i], issuers[i+1:]...)...)
-		break
-	}
-
-	return
+	return nil, nil, nil, nil
 }
 
 // storageHasCertResourcesAnyIssuer returns true if storage has all the
@@ -766,11 +706,7 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 		}
 
 		var privateKey crypto.PrivateKey
-		if cfg.PreventLoadingKeys {
-			privateKey, err = cfg.KeySource.GenerateKey()
-		} else {
-			privateKey, err = PEMDecodePrivateKey(certRes.PrivateKeyPEM)
-		}
+		privateKey, err = cfg.KeySource.GenerateKey()
 		if err != nil {
 			return err
 		}
@@ -879,10 +815,6 @@ func (cfg *Config) generateCSR(privateKey crypto.PrivateKey, sans []string) (*x5
 		}
 	}
 
-	if cfg.MustStaple {
-		csrTemplate.ExtraExtensions = append(csrTemplate.ExtraExtensions, mustStapleExtension)
-	}
-
 	csrDER, err := x509.CreateCertificateRequest(rand.Reader, csrTemplate, privateKey)
 	if err != nil {
 		return nil, err
@@ -927,45 +859,6 @@ func (cfg *Config) RevokeCert(ctx context.Context, domain string, reason int, in
 	}
 
 	return nil
-}
-
-// TLSConfig is an opinionated method that returns a recommended, modern
-// TLS configuration that can be used to configure TLS listeners. Aside
-// from safe, modern defaults, this method sets two critical fields on the
-// TLS config which are required to enable automatic certificate
-// management: GetCertificate and NextProtos.
-//
-// The GetCertificate field is necessary to get certificates from memory
-// or storage, including both manual and automated certificates. You
-// should only change this field if you know what you are doing.
-//
-// The NextProtos field is pre-populated with a special value to enable
-// solving the TLS-ALPN ACME challenge. Because this method does not
-// assume any particular protocols after the TLS handshake is completed,
-// you will likely need to customize the NextProtos field by prepending
-// your application's protocols to the slice. For example, to serve
-// HTTP, you will need to prepend "h2" and "http/1.1" values. Be sure to
-// leave the acmez.ACMETLS1Protocol value intact, however, or TLS-ALPN
-// challenges will fail (which may be acceptable if you are not using
-// ACME, or specifically, the TLS-ALPN challenge).
-//
-// Unlike the package TLS() function, this method does not, by itself,
-// enable certificate management for any domain names.
-func (cfg *Config) TLSConfig() *tls.Config {
-	return &tls.Config{
-		// these two fields necessary for TLS-ALPN challenge
-		GetCertificate: cfg.GetCertificate,
-		NextProtos:     []string{acmez.ACMETLS1Protocol},
-
-		// the rest recommended for modern TLS servers
-		MinVersion: tls.VersionTLS12,
-		CurvePreferences: []tls.CurveID{
-			tls.X25519,
-			tls.CurveP256,
-		},
-		CipherSuites:             preferredDefaultCipherSuites(),
-		PreferServerCipherSuites: true,
-	}
 }
 
 // getChallengeInfo loads the challenge info from either the internal challenge memory
@@ -1058,11 +951,8 @@ func (cfg *Config) checkStorage(ctx context.Context) error {
 func (cfg *Config) storageHasCertResources(ctx context.Context, issuer Issuer, domain string) bool {
 	issuerKey := issuer.IssuerKey()
 	certKey := StorageKeys.SiteCert(issuerKey, domain)
-	keyKey := StorageKeys.SitePrivateKey(issuerKey, domain)
 	metaKey := StorageKeys.SiteMeta(issuerKey, domain)
-	return cfg.Storage.Exists(ctx, certKey) &&
-		(cfg.PreventLoadingKeys || cfg.Storage.Exists(ctx, keyKey)) &&
-		cfg.Storage.Exists(ctx, metaKey)
+	return cfg.Storage.Exists(ctx, certKey) && cfg.Storage.Exists(ctx, metaKey)
 }
 
 // deleteSiteAssets deletes the folder in storage containing the
@@ -1072,12 +962,6 @@ func (cfg *Config) deleteSiteAssets(ctx context.Context, issuerKey, domain strin
 	err := cfg.Storage.Delete(ctx, StorageKeys.SiteCert(issuerKey, domain))
 	if err != nil {
 		return fmt.Errorf("deleting certificate file: %v", err)
-	}
-	if !cfg.PreventLoadingKeys {
-		err = cfg.Storage.Delete(ctx, StorageKeys.SitePrivateKey(issuerKey, domain))
-		if err != nil {
-			return fmt.Errorf("deleting private key: %v", err)
-		}
 	}
 	err = cfg.Storage.Delete(ctx, StorageKeys.SiteMeta(issuerKey, domain))
 	if err != nil {
@@ -1120,34 +1004,8 @@ type CertificateSelector interface {
 	SelectCertificate(*tls.ClientHelloInfo, []Certificate) (Certificate, error)
 }
 
-// OCSPConfig configures how OCSP is handled.
-type OCSPConfig struct {
-	// Disable automatic OCSP stapling; strongly
-	// discouraged unless you have a good reason.
-	// Disabling this puts clients at greater risk
-	// and reduces their privacy.
-	DisableStapling bool
-
-	// A map of OCSP responder domains to replacement
-	// domains for querying OCSP servers. Used for
-	// overriding the OCSP responder URL that is
-	// embedded in certificates. Mapping to an empty
-	// URL will disable OCSP from that responder.
-	ResponderOverrides map[string]string
-}
-
 // certIssueLockOp is the name of the operation used
 // when naming a lock to make it mutually exclusive
 // with other certificate issuance operations for a
 // certain name.
 const certIssueLockOp = "issue_cert"
-
-// Constants for PKIX MustStaple extension.
-var (
-	tlsFeatureExtensionOID = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 1, 24}
-	ocspMustStapleFeature  = []byte{0x30, 0x03, 0x02, 0x01, 0x05}
-	mustStapleExtension    = pkix.Extension{
-		Id:    tlsFeatureExtensionOID,
-		Value: ocspMustStapleFeature,
-	}
-)

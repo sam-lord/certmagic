@@ -193,19 +193,6 @@ func (keys KeyBuilder) SiteMeta(issuerKey, domain string) string {
 	return path.Join(keys.CertsSitePrefix(issuerKey, domain), safeDomain+".json")
 }
 
-// OCSPStaple returns a key for the OCSP staple associated
-// with the given certificate. If you have the PEM bundle
-// handy, pass that in to save an extra encoding step.
-func (keys KeyBuilder) OCSPStaple(cert *Certificate, pemBundle []byte) string {
-	var ocspFileName string
-	if len(cert.Names) > 0 {
-		firstName := keys.Safe(cert.Names[0])
-		ocspFileName = firstName + "-"
-	}
-	ocspFileName += fastHash(pemBundle)
-	return path.Join(prefixOCSP, ocspFileName)
-}
-
 // Safe standardizes and sanitizes str for use as
 // a single component of a storage key. This method
 // is idempotent.
@@ -283,7 +270,6 @@ var StorageKeys KeyBuilder
 
 const (
 	prefixCerts = "certificates"
-	prefixOCSP  = "ocsp"
 )
 
 // safeKeyRE matches any undesirable characters in storage keys.

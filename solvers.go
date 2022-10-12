@@ -16,7 +16,6 @@ package certmagic
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -107,127 +106,6 @@ func (s *httpSolver) CleanUp(_ context.Context, _ acme.Challenge) error {
 	if si.count == 0 {
 		// last one out turns off the lights
 		atomic.StoreInt32(&s.closed, 1)
-		if si.listener != nil {
-			si.listener.Close()
-			<-si.done
-		}
-		delete(solvers, s.address)
-	}
-	return nil
-}
-
-// tlsALPNSolver is a type that can solve TLS-ALPN challenges.
-// It must have an associated config and address on which to
-// serve the challenge.
-type tlsALPNSolver struct {
-	config  *Config
-	address string
-}
-
-// Present adds the certificate to the certificate cache and, if
-// needed, starts a TLS server for answering TLS-ALPN challenges.
-func (s *tlsALPNSolver) Present(ctx context.Context, chal acme.Challenge) error {
-	// we pre-generate the certificate for efficiency with multi-perspective
-	// validation, so it only has to be done once (at least, by this instance;
-	// distributed solving does not have that luxury, oh well) - update the
-	// challenge data in memory to be the generated certificate
-	cert, err := acmez.TLSALPN01ChallengeCert(chal)
-	if err != nil {
-		return err
-	}
-
-	key := challengeKey(chal)
-	activeChallengesMu.Lock()
-	chalData := activeChallenges[key]
-	chalData.data = cert
-	activeChallenges[key] = chalData
-	activeChallengesMu.Unlock()
-
-	// the rest of this function increments the
-	// challenge count for the solver at this
-	// listener address, and if necessary, starts
-	// a simple TLS server
-
-	solversMu.Lock()
-	defer solversMu.Unlock()
-
-	si := getSolverInfo(s.address)
-	si.count++
-	if si.listener != nil {
-		return nil // already be served by us
-	}
-
-	// notice the unusual error handling here; we
-	// only continue to start a challenge server if
-	// we got a listener; in all other cases return
-	ln, err := robustTryListen(s.address)
-	if ln == nil {
-		return err
-	}
-
-	// we were able to bind the socket, so make it into a TLS
-	// listener, store it with the solverInfo, and start the
-	// challenge server
-
-	si.listener = tls.NewListener(ln, s.config.TLSConfig())
-
-	go func() {
-		defer func() {
-			if err := recover(); err != nil {
-				buf := make([]byte, stackTraceBufferSize)
-				buf = buf[:runtime.Stack(buf, false)]
-				log.Printf("panic: tls-alpn solver server: %v\n%s", err, buf)
-			}
-		}()
-		defer close(si.done)
-		for {
-			conn, err := si.listener.Accept()
-			if err != nil {
-				if atomic.LoadInt32(&si.closed) == 1 {
-					return
-				}
-				log.Printf("[ERROR] TLS-ALPN challenge server: accept: %v", err)
-				continue
-			}
-			go s.handleConn(conn)
-		}
-	}()
-
-	return nil
-}
-
-// handleConn completes the TLS handshake and then closes conn.
-func (*tlsALPNSolver) handleConn(conn net.Conn) {
-	defer func() {
-		if err := recover(); err != nil {
-			buf := make([]byte, stackTraceBufferSize)
-			buf = buf[:runtime.Stack(buf, false)]
-			log.Printf("panic: tls-alpn solver handler: %v\n%s", err, buf)
-		}
-	}()
-	defer conn.Close()
-	tlsConn, ok := conn.(*tls.Conn)
-	if !ok {
-		log.Printf("[ERROR] TLS-ALPN challenge server: expected tls.Conn but got %T: %#v", conn, conn)
-		return
-	}
-	err := tlsConn.Handshake()
-	if err != nil {
-		log.Printf("[ERROR] TLS-ALPN challenge server: handshake: %v", err)
-		return
-	}
-}
-
-// CleanUp removes the challenge certificate from the cache, and if
-// it is the last one to finish, stops the TLS server.
-func (s *tlsALPNSolver) CleanUp(_ context.Context, chal acme.Challenge) error {
-	solversMu.Lock()
-	defer solversMu.Unlock()
-	si := getSolverInfo(s.address)
-	si.count--
-	if si.count == 0 {
-		// last one out turns off the lights
-		atomic.StoreInt32(&si.closed, 1)
 		if si.listener != nil {
 			si.listener.Close()
 			<-si.done

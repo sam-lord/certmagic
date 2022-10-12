@@ -270,11 +270,9 @@ func (cfg *Config) loadCertResource(ctx context.Context, issuer Issuer, certName
 // hashCertificateChain computes the unique hash of certChain,
 // which is the chain of DER-encoded bytes. It returns the
 // hex encoding of the hash.
-func hashCertificateChain(certChain [][]byte) string {
+func hashCertificateChain(cert []byte) string {
 	h := sha256.New()
-	for _, certInChain := range certChain {
-		h.Write(certInChain)
-	}
+	h.Write(cert)
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
