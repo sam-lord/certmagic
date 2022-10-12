@@ -602,7 +602,7 @@ func (cfg *Config) obtainCert(ctx context.Context, name string, interactive bool
 // is found, that issuer should be tried first, so it is moved to the front in a copy of
 // cfg.Issuers).
 func (cfg *Config) reusePrivateKey(ctx context.Context, domain string) (privKey crypto.PrivateKey, privKeyPEM []byte, issuers []Issuer, err error) {
-	return nil, nil, nil, nil
+	return nil, nil, cfg.Issuers, nil
 }
 
 // storageHasCertResourcesAnyIssuer returns true if storage has all the
