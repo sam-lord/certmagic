@@ -158,7 +158,7 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 
 	// Reload certificates that merely need to be updated in memory
 	for _, oldCert := range reloadQueue {
-		timeLeft := expiresAt(&oldCert.Certificate).Sub(time.Now().UTC())
+		timeLeft := expiresAt(oldCert.Certificate).Sub(time.Now().UTC())
 		log.Info("certificate expires soon, but is already renewed in storage; reloading stored certificate",
 			zap.Strings("identifiers", oldCert.Names),
 			zap.Duration("remaining", timeLeft))
@@ -200,7 +200,7 @@ func (certCache *Cache) RenewManagedCertificates(ctx context.Context) error {
 func (certCache *Cache) queueRenewalTask(ctx context.Context, oldCert Certificate, cfg *Config) error {
 	log := certCache.logger.Named("maintenance")
 
-	timeLeft := expiresAt(&oldCert.Certificate).Sub(time.Now().UTC())
+	timeLeft := expiresAt(oldCert.Certificate).Sub(time.Now().UTC())
 	log.Info("certificate expires soon; queuing for renewal",
 		zap.Strings("identifiers", oldCert.Names),
 		zap.Duration("remaining", timeLeft))
@@ -212,7 +212,7 @@ func (certCache *Cache) queueRenewalTask(ctx context.Context, oldCert Certificat
 
 	// queue up this renewal job (is a no-op if already active or queued)
 	jm.Submit(cfg.Logger, "renew_"+renewName, func() error {
-		timeLeft := expiresAt(&oldCert.Certificate).Sub(time.Now().UTC())
+		timeLeft := expiresAt(oldCert.Certificate).Sub(time.Now().UTC())
 		log.Info("attempting certificate renewal",
 			zap.Strings("identifiers", oldCert.Names),
 			zap.Duration("remaining", timeLeft))
@@ -345,7 +345,7 @@ func deleteExpiredCerts(ctx context.Context, storage Storage, gracePeriod time.D
 func (cfg *Config) forceRenew(ctx context.Context, logger *zap.Logger, cert Certificate) (Certificate, error) {
 	logger.Warn("forcefully renewing certificate",
 		zap.Strings("identifiers", cert.Names),
-		zap.Time("expiration", expiresAt(&cert.Certificate)))
+		zap.Time("expiration", expiresAt(cert.Certificate)))
 
 	renewName := cert.Names[0]
 

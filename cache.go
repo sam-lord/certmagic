@@ -194,7 +194,7 @@ func (certCache *Cache) unsyncedCacheCertificate(cert Certificate) {
 	if _, ok := certCache.cache[cert.hash]; ok {
 		certCache.logger.Debug("certificate already cached",
 			zap.Strings("subjects", cert.Names),
-			zap.Time("expiration", expiresAt(&cert.Certificate)),
+			zap.Time("expiration", expiresAt(cert.Certificate)),
 			zap.Bool("managed", cert.managed),
 			zap.String("issuer_key", cert.issuerKey),
 			zap.String("hash", cert.hash))
@@ -235,7 +235,7 @@ func (certCache *Cache) unsyncedCacheCertificate(cert Certificate) {
 
 	certCache.logger.Debug("added certificate to cache",
 		zap.Strings("subjects", cert.Names),
-		zap.Time("expiration", expiresAt(&cert.Certificate)),
+		zap.Time("expiration", expiresAt(cert.Certificate)),
 		zap.Bool("managed", cert.managed),
 		zap.String("issuer_key", cert.issuerKey),
 		zap.String("hash", cert.hash),
@@ -269,7 +269,7 @@ func (certCache *Cache) removeCertificate(cert Certificate) {
 
 	certCache.logger.Debug("removed certificate from cache",
 		zap.Strings("subjects", cert.Names),
-		zap.Time("expiration", expiresAt(&cert.Certificate)),
+		zap.Time("expiration", expiresAt(cert.Certificate)),
 		zap.Bool("managed", cert.managed),
 		zap.String("issuer_key", cert.issuerKey),
 		zap.String("hash", cert.hash),
@@ -288,7 +288,7 @@ func (certCache *Cache) replaceCertificate(oldCert, newCert Certificate) {
 	certCache.mu.Unlock()
 	certCache.logger.Info("replaced certificate in cache",
 		zap.Strings("subjects", newCert.Names),
-		zap.Time("new_expiration", expiresAt(&newCert.Certificate)))
+		zap.Time("new_expiration", expiresAt(newCert.Certificate)))
 }
 
 func (certCache *Cache) getAllMatchingCerts(name string) []Certificate {

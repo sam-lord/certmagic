@@ -31,7 +31,7 @@ import (
 // we are more efficient by extracting the metadata onto this struct,
 // but at the cost of slightly higher memory use.
 type Certificate struct {
-	x509.Certificate
+	*x509.Certificate
 
 	// Names is the list of subject names this
 	// certificate is signed for.
@@ -59,12 +59,12 @@ func (cert Certificate) Empty() bool {
 // NeedsRenewal returns true if the certificate is
 // expiring soon (according to cfg) or has expired.
 func (cert Certificate) NeedsRenewal(cfg *Config) bool {
-	return currentlyInRenewalWindow(cert.NotBefore, expiresAt(&cert.Certificate), cfg.RenewalWindowRatio)
+	return currentlyInRenewalWindow(cert.NotBefore, expiresAt(cert.Certificate), cfg.RenewalWindowRatio)
 }
 
 // Expired returns true if the certificate has expired.
 func (cert Certificate) Expired() bool {
-	return time.Now().After(expiresAt(&cert.Certificate))
+	return time.Now().After(expiresAt(cert.Certificate))
 }
 
 // currentlyInRenewalWindow returns true if the current time is
@@ -234,7 +234,7 @@ func fillCertFromX509(cert *Certificate, x509Cert x509.Certificate) error {
 	if len(x509Cert.Raw) == 0 {
 		return fmt.Errorf("certificate is empty")
 	}
-	cert.Certificate = x509Cert
+	cert.Certificate = &x509Cert
 
 	// for convenience, we do want to assemble all the
 	// subjects on the certificate into one list
