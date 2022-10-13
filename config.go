@@ -280,18 +280,14 @@ func (cfg *Config) ManageAsync(ctx context.Context, domainNames []string) error 
 	return cfg.manageAll(ctx, domainNames, true)
 }
 
-func (cfg *Config) GetCertificate(ctx context.Context, domainName string) (*x509.Certificate, error) {
+func (cfg *Config) GetCertificate(ctx context.Context, domainName string) (*Certificate, error) {
 	certRes, err := cfg.loadCertResourceAnyIssuer(ctx, domainName)
 	if err != nil {
 		return nil, err
 	}
 
-	certs, err := parseCertsFromPEMBundle(certRes.CertificatePEM)
-	if err != nil {
-		return nil, err
-	}
-
-	return certs[0], nil
+	cert, err := cfg.makeCertificate(ctx, certRes.CertificatePEM)
+	return &cert, err
 }
 
 func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bool) error {

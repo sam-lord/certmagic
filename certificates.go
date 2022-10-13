@@ -126,7 +126,7 @@ func (cfg *Config) loadManagedCertificate(ctx context.Context, domain string) (C
 	if err != nil {
 		return Certificate{}, err
 	}
-	cert, err := cfg.makeCertificate(ctx, certRes.CertificatePEM, certRes.PrivateKeyPEM)
+	cert, err := cfg.makeCertificate(ctx, certRes.CertificatePEM)
 	if err != nil {
 		return cert, err
 	}
@@ -140,8 +140,8 @@ func (cfg *Config) loadManagedCertificate(ctx context.Context, domain string) (C
 // the in-memory cache.
 //
 // This method is safe for concurrent use.
-func (cfg *Config) CacheUnmanagedCertificatePEMFile(ctx context.Context, certFile, keyFile string, tags []string) error {
-	cert, err := cfg.makeCertificateFromDisk(ctx, cfg.Storage, certFile, keyFile)
+func (cfg *Config) CacheUnmanagedCertificatePEMFile(ctx context.Context, certFile string, tags []string) error {
+	cert, err := cfg.makeCertificateFromDisk(ctx, cfg.Storage, certFile)
 	if err != nil {
 		return err
 	}
@@ -170,8 +170,8 @@ func (cfg *Config) CacheUnmanagedTLSCertificate(ctx context.Context, x509Cert x5
 // of the certificate and key, then caches it in memory.
 //
 // This method is safe for concurrent use.
-func (cfg *Config) CacheUnmanagedCertificatePEMBytes(ctx context.Context, certBytes, keyBytes []byte, tags []string) error {
-	cert, err := cfg.makeCertificate(ctx, certBytes, keyBytes)
+func (cfg *Config) CacheUnmanagedCertificatePEMBytes(ctx context.Context, certBytes []byte, tags []string) error {
+	cert, err := cfg.makeCertificate(ctx, certBytes)
 	if err != nil {
 		return err
 	}
@@ -185,20 +185,19 @@ func (cfg *Config) CacheUnmanagedCertificatePEMBytes(ctx context.Context, certBy
 // certificate and key files. It fills out all the fields in
 // the certificate except for the Managed and OnDemand flags.
 // (It is up to the caller to set those.)
-func (cfg Config) makeCertificateFromDisk(ctx context.Context, storage Storage, certFile, keyFile string) (Certificate, error) {
+func (cfg Config) makeCertificateFromDisk(ctx context.Context, storage Storage, certFile string) (Certificate, error) {
 	certPEMBlock, err := os.ReadFile(certFile)
 	if err != nil {
 		return Certificate{}, err
 	}
-	keyPEMBlock, err := os.ReadFile(keyFile)
 	if err != nil {
 		return Certificate{}, err
 	}
-	return cfg.makeCertificate(ctx, certPEMBlock, keyPEMBlock)
+	return cfg.makeCertificate(ctx, certPEMBlock)
 }
 
-func (cfg Config) makeCertificate(ctx context.Context, certPEMBlock, keyPEMBlock []byte) (Certificate, error) {
-	cert, err := makeCertificate(certPEMBlock, keyPEMBlock)
+func (cfg Config) makeCertificate(ctx context.Context, certPEMBlock []byte) (Certificate, error) {
+	cert, err := makeCertificate(certPEMBlock)
 	if err != nil {
 		return cert, err
 	}
@@ -209,18 +208,13 @@ func (cfg Config) makeCertificate(ctx context.Context, certPEMBlock, keyPEMBlock
 // a Certificate with necessary metadata from parsing its bytes filled into
 // its struct fields for convenience (except for the OnDemand and Managed
 // flags; it is up to the caller to set those properties!).
-func makeCertificate(certPEMBlock, keyPEMBlock []byte) (Certificate, error) {
+func makeCertificate(certPEMBlock []byte) (Certificate, error) {
 	var cert Certificate
 
-	// Convert to a tls.Certificate
-
-	x509Cert, err := x509.ParseCertificate(certPEMBlock)
-	if err != nil {
-		return cert, err
-	}
+	certs, err := parseCertsFromPEMBundle(certPEMBlock)
 
 	// Extract necessary metadata
-	err = fillCertFromX509(&cert, *x509Cert)
+	err = fillCertFromX509(&cert, *certs[0])
 	if err != nil {
 		return cert, err
 	}
