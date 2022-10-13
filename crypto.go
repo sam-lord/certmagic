@@ -245,11 +245,6 @@ func (cfg *Config) loadCertResource(ctx context.Context, issuer Issuer, certName
 		return CertificateResource{}, fmt.Errorf("converting '%s' to ASCII: %v", certNamesKey, err)
 	}
 
-	keyBytes, err := cfg.Storage.Load(ctx, StorageKeys.SitePrivateKey(certRes.issuerKey, normalizedName))
-	if err != nil {
-		return CertificateResource{}, err
-	}
-	certRes.PrivateKeyPEM = keyBytes
 	certBytes, err := cfg.Storage.Load(ctx, StorageKeys.SiteCert(certRes.issuerKey, normalizedName))
 	if err != nil {
 		return CertificateResource{}, err
