@@ -280,27 +280,18 @@ func (cfg *Config) ManageAsync(ctx context.Context, domainNames []string) error 
 	return cfg.manageAll(ctx, domainNames, true)
 }
 
-// ClientCredentials returns a list of TLS client certificate chains for the given identifiers.
-// The return value can be used in a tls.Config to enable client authentication using managed certificates.
-// Any certificates that need to be obtained or renewed for these identifiers will be managed accordingly.
-func (cfg *Config) ClientCredentials(ctx context.Context, identifiers []string) ([]tls.Certificate, error) {
-	err := cfg.manageAll(ctx, identifiers, false)
+func (cfg *Config) GetCertificate(ctx context.Context, domainName string) (*x509.Certificate, error) {
+	certRes, err := cfg.loadCertResourceAnyIssuer(ctx, domainName)
 	if err != nil {
 		return nil, err
 	}
-	var chains []tls.Certificate
-	for _, id := range identifiers {
-		certRes, err := cfg.loadCertResourceAnyIssuer(ctx, id)
-		if err != nil {
-			return chains, err
-		}
-		chain, err := tls.X509KeyPair(certRes.CertificatePEM, certRes.PrivateKeyPEM)
-		if err != nil {
-			return chains, err
-		}
-		chains = append(chains, chain)
+
+	certs, err := parseCertsFromPEMBundle(certRes.CertificatePEM)
+	if err != nil {
+		return nil, err
 	}
-	return chains, nil
+
+	return certs[0], nil
 }
 
 func (cfg *Config) manageAll(ctx context.Context, domainNames []string, async bool) error {
