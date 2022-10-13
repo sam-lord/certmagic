@@ -360,12 +360,6 @@ func (cfg *Config) manageOne(ctx context.Context, domainName string, async bool)
 	// for an existing certificate, make sure it is renewed; or if it is revoked,
 	// force a renewal even if it's not expiring
 	renew := func() error {
-		// first, ensure status is not revoked (it was just refreshed in CacheManagedCertificate above)
-		if !cert.Expired() {
-			_, err = cfg.forceRenew(ctx, cfg.Logger, cert)
-			return err
-		}
-
 		// otherwise, simply renew the certificate if needed
 		if cert.NeedsRenewal(cfg) {
 			var err error
