@@ -742,11 +742,16 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 			return fmt.Errorf("[%s] Renew: %w", name, err)
 		}
 
+		privateKeyPem, err := PEMEncodePrivateKey(privateKey)
+		if err != nil {
+			return fmt.Errorf("[%s] Failed to encode private key", name)
+		}
+
 		// success - immediately save the renewed certificate resource
 		newCertRes := CertificateResource{
 			SANs:           namesFromCSR(csr),
 			CertificatePEM: issuedCert.Certificate,
-			PrivateKeyPEM:  certRes.PrivateKeyPEM,
+			PrivateKeyPEM:  privateKeyPem,
 			IssuerData:     issuedCert.Metadata,
 		}
 		err = cfg.saveCertResource(ctx, issuerUsed, newCertRes)
