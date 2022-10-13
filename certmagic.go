@@ -280,6 +280,9 @@ type CertificateResource struct {
 	// for the cert or chain.
 	CertificatePEM []byte `json:"-"`
 
+	// The PEM-encoding of the certificate's private key.
+	PrivateKeyPEM []byte `json:"-"`
+
 	// Any extra information associated with the certificate,
 	// usually provided by the issuer implementation.
 	IssuerData any `json:"issuer_data,omitempty"`
