@@ -91,8 +91,21 @@ func (cfg *Config) GetCertificateWithContext(ctx context.Context, clientHello *t
 
 	// get the certificate and serve it up
 	cert, err := cfg.getCertDuringHandshake(ctx, clientHello, true)
+	if err != nil {
+		return nil, err
+	}
 
-	return &cert.Certificate, err
+	// Check if certificate has no private key (metadata-only certificate)
+	// This happens when storage didn't provide private keys
+	if len(cert.Certificate.Certificate) > 0 && cert.Certificate.PrivateKey == nil {
+		cfg.Logger.Debug("certificate found but has no private key for TLS",
+			zap.String("server_name", clientHello.ServerName),
+			zap.Strings("certificate_names", cert.Names),
+			zap.String("hash", cert.Hash()))
+		return nil, fmt.Errorf("certificate %s has no private key available for TLS", clientHello.ServerName)
+	}
+
+	return &cert.Certificate, nil
 }
 
 // getCertificateFromCache gets a certificate that matches name from the in-memory

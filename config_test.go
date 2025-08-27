@@ -83,3 +83,70 @@ func mustJSON(val any) []byte {
 	}
 	return result
 }
+
+func TestLoadCertResourceWithMissingPrivateKey(t *testing.T) {
+	ctx := context.Background()
+
+	am := &ACMEIssuer{CA: "https://example.com/acme/directory"}
+	testConfig := &Config{
+		Issuers:   []Issuer{am},
+		Storage:   &FileStorage{Path: "./_testdata_tmp_missing_key"},
+		Logger:    defaultTestLogger,
+		certCache: new(Cache),
+	}
+	am.config = testConfig
+
+	testStorageDir := testConfig.Storage.(*FileStorage).Path
+	defer func() {
+		err := os.RemoveAll(testStorageDir)
+		if err != nil {
+			t.Fatalf("Could not remove temporary storage directory (%s): %v", testStorageDir, err)
+		}
+	}()
+
+	domain := "example.com"
+	certContents := "certificate"
+	keyContents := "private key"
+
+	cert := CertificateResource{
+		SANs:           []string{domain},
+		PrivateKeyPEM:  []byte(keyContents),
+		CertificatePEM: []byte(certContents),
+		IssuerData: mustJSON(acme.Certificate{
+			URL: "https://example.com/cert",
+		}),
+		issuerKey: am.IssuerKey(),
+	}
+
+	// First save the certificate normally
+	err := testConfig.saveCertResource(ctx, am, cert)
+	if err != nil {
+		t.Fatalf("Expected no error saving, got: %v", err)
+	}
+
+	// Now simulate a storage backend that doesn't provide private keys
+	// by manually deleting the private key file
+	privateKeyPath := testConfig.Storage.(*FileStorage).Filename(StorageKeys.SitePrivateKey(am.IssuerKey(), domain))
+	err = os.Remove(privateKeyPath)
+	if err != nil {
+		t.Fatalf("Failed to remove private key file: %v", err)
+	}
+
+	// Try to load certificate (should succeed gracefully without private key)
+	siteData, err := testConfig.loadCertResource(ctx, am, domain)
+	if err != nil {
+		t.Fatalf("Expected no error reading site, got: %v", err)
+	}
+
+	// Private key should be nil when not available from storage
+	if siteData.PrivateKeyPEM != nil {
+		t.Error("Expected private key to be nil when not available from storage")
+	}
+
+	// Certificate should still be loaded correctly
+	if !reflect.DeepEqual(siteData.CertificatePEM, cert.CertificatePEM) {
+		t.Error("Certificate PEM should match")
+	}
+}
+
+// Tests for the new functionality will be added in Phase 3

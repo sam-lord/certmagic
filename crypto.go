@@ -39,6 +39,13 @@ import (
 	"golang.org/x/net/idna"
 )
 
+var (
+	// ErrPrivateKeyUnavailable indicates that a certificate's private key is not available in storage
+	ErrPrivateKeyUnavailable = errors.New("certificate private key unavailable")
+	// ErrTLSCertificateInvalid indicates that a certificate cannot be used for TLS operations
+	ErrTLSCertificateInvalid = errors.New("certificate not suitable for TLS operations")
+)
+
 // PEMEncodePrivateKey marshals a private key into a PEM-encoded block.
 // The private key must be one of *ecdsa.PrivateKey, *rsa.PrivateKey, or
 // *ed25519.PrivateKey.
@@ -248,9 +255,16 @@ func (cfg *Config) loadCertResource(ctx context.Context, issuer Issuer, certName
 
 	keyBytes, err := cfg.Storage.Load(ctx, StorageKeys.SitePrivateKey(certRes.issuerKey, normalizedName))
 	if err != nil {
-		return CertificateResource{}, err
+		// Private key might not be available in storage (e.g., CDN storage, security policy, etc.)
+		// This is acceptable - we can still load the certificate for management purposes
+		cfg.Logger.Debug("private key not found in storage, certificate will be metadata-only",
+			zap.String("certificate", normalizedName),
+			zap.String("issuer", certRes.issuerKey),
+			zap.Error(err))
+		certRes.PrivateKeyPEM = nil
+	} else {
+		certRes.PrivateKeyPEM = keyBytes
 	}
-	certRes.PrivateKeyPEM = keyBytes
 	certBytes, err := cfg.Storage.Load(ctx, StorageKeys.SiteCert(certRes.issuerKey, normalizedName))
 	if err != nil {
 		return CertificateResource{}, err

@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -425,16 +426,35 @@ func (cfg Config) makeCertificateFromDiskWithOCSP(ctx context.Context, certFile,
 // makeCertificateWithOCSP is the same as makeCertificate except that it also
 // staples OCSP to the certificate.
 func (cfg Config) makeCertificateWithOCSP(ctx context.Context, certPEMBlock, keyPEMBlock []byte) (Certificate, error) {
-	cert, err := makeCertificate(certPEMBlock, keyPEMBlock)
-	if err != nil {
-		return cert, err
+	var cert Certificate
+	var err error
+
+	if keyPEMBlock == nil {
+		// Create metadata-only certificate when no private key available
+		// This can happen when storage backend doesn't provide private keys
+		cert, err = makeCertificateMetadataOnly(certPEMBlock)
+		if err != nil {
+			return cert, err
+		}
+		cfg.Logger.Debug("created metadata-only certificate (no private key available)",
+			zap.Strings("identifiers", cert.Names))
+	} else {
+		// Standard certificate creation with private key
+		cert, err = makeCertificate(certPEMBlock, keyPEMBlock)
+		if err != nil {
+			return cert, err
+		}
+		// Set flags for certificates with private keys
 	}
+
+	// OCSP stapling works regardless of private key availability
 	err = stapleOCSP(ctx, cfg.OCSP, cfg.Storage, &cert, certPEMBlock)
 	if errors.Is(err, ErrNoOCSPServerSpecified) {
 		cfg.Logger.Debug("stapling OCSP", zap.Error(err), zap.Strings("identifiers", cert.Names))
-	} else {
+	} else if err != nil {
 		cfg.Logger.Warn("stapling OCSP", zap.Error(err), zap.Strings("identifiers", cert.Names))
 	}
+
 	return cert, nil
 }
 
@@ -457,6 +477,59 @@ func makeCertificate(certPEMBlock, keyPEMBlock []byte) (Certificate, error) {
 	if err != nil {
 		return cert, err
 	}
+
+	return cert, nil
+}
+
+// makeCertificateMetadataOnly creates a Certificate struct with metadata extracted
+// from certificate PEM data but without creating a valid tls.Certificate.
+// This is used when no private key is available from storage and we need certificate
+// information for management purposes but cannot serve it for TLS.
+func makeCertificateMetadataOnly(certPEMBlock []byte) (Certificate, error) {
+	var cert Certificate
+
+	// Parse all certificates in the chain
+	var certChain [][]byte
+	rest := certPEMBlock
+	for {
+		block, remaining := pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type == "CERTIFICATE" {
+			certChain = append(certChain, block.Bytes)
+		}
+		rest = remaining
+		if len(rest) == 0 {
+			break
+		}
+	}
+
+	if len(certChain) == 0 {
+		return cert, fmt.Errorf("no certificates found in PEM data")
+	}
+
+	// Parse leaf certificate for metadata
+	leafCert, err := x509.ParseCertificate(certChain[0])
+	if err != nil {
+		return cert, err
+	}
+
+	// Extract metadata (similar to fillCertFromLeaf but without tls.Certificate creation)
+	cert.Names = append(cert.Names, leafCert.DNSNames...)
+	for _, ip := range leafCert.IPAddresses {
+		cert.Names = append(cert.Names, ip.String())
+	}
+	if leafCert.Subject.CommonName != "" {
+		cert.Names = append(cert.Names, leafCert.Subject.CommonName)
+	}
+
+	// Set certificate chain for hash calculation and reference
+	cert.Certificate.Certificate = certChain
+	cert.hash = hashCertificateChain(certChain)
+	cert.Certificate.Leaf = leafCert
+
+	// Mark as not having a valid TLS certificate or private key
 
 	return cert, nil
 }
@@ -512,6 +585,8 @@ func fillCertFromLeaf(cert *Certificate, tlsCert tls.Certificate) error {
 	}
 
 	cert.hash = hashCertificateChain(cert.Certificate.Certificate)
+
+	// Set default flags for certificates created with private keys
 
 	return nil
 }

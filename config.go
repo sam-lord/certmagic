@@ -842,21 +842,26 @@ func (cfg *Config) renewCert(ctx context.Context, name string, force, interactiv
 
 		// reuse or generate new private key for CSR
 		var privateKey crypto.PrivateKey
-		if cfg.ReusePrivateKeys {
+		if cfg.ReusePrivateKeys && certRes.PrivateKeyPEM != nil {
 			privateKey, err = PEMDecodePrivateKey(certRes.PrivateKeyPEM)
 		} else {
+			// Generate new key if:
+			// 1. ReusePrivateKeys is false, OR
+			// 2. Private key is missing from storage (not available from storage backend)
 			privateKey, err = cfg.KeySource.GenerateKey()
+			if certRes.PrivateKeyPEM == nil {
+				log.Debug("generating new private key for renewal (no existing key available)",
+					zap.String("identifier", name))
+			}
 		}
 		if err != nil {
 			return err
 		}
 
-		// if we generated a new key, make sure to replace its PEM encoding too!
-		if !cfg.ReusePrivateKeys {
-			certRes.PrivateKeyPEM, err = PEMEncodePrivateKey(privateKey)
-			if err != nil {
-				return err
-			}
+		// encode the private key for use during issuance
+		certRes.PrivateKeyPEM, err = PEMEncodePrivateKey(privateKey)
+		if err != nil {
+			return err
 		}
 
 		csr, err := cfg.generateCSR(privateKey, []string{name}, false)
@@ -1056,7 +1061,7 @@ func (cfg *Config) RevokeCert(ctx context.Context, domain string, reason int, in
 		}
 
 		if !cfg.Storage.Exists(ctx, StorageKeys.SitePrivateKey(issuerKey, domain)) {
-			return fmt.Errorf("private key not found for %s", certRes.SANs)
+			return fmt.Errorf("private key not found in storage for %s: revocation requires the private key", certRes.SANs)
 		}
 
 		err = rev.Revoke(ctx, certRes, reason)
