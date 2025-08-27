@@ -6,8 +6,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/caddyserver/certmagic"
-	"github.com/caddyserver/certmagic/internal/testutil"
+	"github.com/sam-lord/certmagic"
+	"github.com/sam-lord/certmagic/internal/testutil"
 )
 
 func TestFileStorageStoreLoad(t *testing.T) {

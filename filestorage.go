@@ -27,7 +27,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/caddyserver/certmagic/internal/atomicfile"
+	"github.com/sam-lord/certmagic/internal/atomicfile"
 )
 
 // FileStorage facilitates forming file paths derived from a root
